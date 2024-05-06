@@ -874,11 +874,20 @@ public abstract class AbstractQueuedSynchronizer
      *
      * @param node the node
      */
-    private void unparkSuccessor(Node node) {
+    /**
+     * 唤醒节点的后继节点中的线程，如果存在的话。
+     * 注意这里只唤醒了一个线程
+     * @param node 被操作的节点
+     */
+    private void unparkSuccessor(Node node) { //这里入参是head节点
         /*
          * If status is negative (i.e., possibly needing signal) try
          * to clear in anticipation of signalling.  It is OK if this
          * fails or if status is changed by waiting thread.
+         */
+        /**
+         *    // 如果节点的状态为负（可能需要发出信号），尝试将其清零以预期发出信号。
+         *     // 即便此操作失败或等待线程改变了状态也是允许的。因为这里及时失败了，也不会对系统造成很大的影响。
          */
         int ws = node.waitStatus;
         if (ws < 0)
@@ -890,14 +899,23 @@ public abstract class AbstractQueuedSynchronizer
          * traverse backwards from tail to find the actual
          * non-cancelled successor.
          */
+        /**
+         *   // 要唤醒的线程保存在后继节点中，通常就是下一个节点。
+         *     // 但如果后继节点被取消或看似为null，则需要从队列尾部开始向前遍历，
+         *     // 找到实际上未被取消的后继节点。
+         */
         Node s = node.next;
         if (s == null || s.waitStatus > 0) {
             s = null;
+            /* 从尾部向前来遍历，确保找到有效的未取消节点，之所以是在尾部，是因为存在一种情况，如果是新进节点，pre.next还没有正确设置
+             这里在 acquire的代码上可以看见。*/
             for (Node t = tail; t != null && t != node; t = t.prev)
                 if (t.waitStatus <= 0)
                     s = t;
         }
+        // 如果找到了有效的后继节点，则唤醒它的线程
         if (s != null)
+            /*这里唤醒后，就会进入acquireQueued方法，去尝试获取锁*/
             LockSupport.unpark(s.thread);
     }
 
@@ -1384,6 +1402,22 @@ public abstract class AbstractQueuedSynchronizer
      *         correctly.
      * @throws UnsupportedOperationException if exclusive mode is not supported
      */
+    /**
+     * 尝试设置状态以反映独占模式下的释放操作。
+     *
+     * <p>此方法总是由执行释放操作的线程调用。
+     *
+     * <p>默认实现会抛出`UnsupportedOperationException`。
+     *
+     * @param arg 释放参数。这个值总是传递给释放方法的参数，或者是进入条件等待时的当前状态值。
+     *            该值本身不做特定解读，可以表示你希望的任何内容。
+     * @return 如果此对象现在处于完全释放的状态，允许任何等待的线程尝试获取，则返回{@code true}；
+     *         否则返回{@code false}。
+     * @throws IllegalMonitorStateException 如果释放操作会导致此同步器处于非法状态。
+     *         为了确保同步工作的正确性，此异常必须以一致的方式抛出。
+     * @throws UnsupportedOperationException 如果不支持独占模式。
+     */
+
     protected boolean tryRelease(int arg) {
         throw new UnsupportedOperationException();
     }
@@ -1485,8 +1519,9 @@ public abstract class AbstractQueuedSynchronizer
      */
     public final void acquire(int arg) {
         if (!tryAcquire(arg) &&
-                //先将节点入队，
+                //这一行代码将当前线程加入到同步队列中，并等待获取锁。如果成功获取锁，返回 true，否则返回 false。，
             acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            //如果在排队等待获取锁的过程中，当前线程被中断过，那么会执行这一行代码，产生一个中断请求
             selfInterrupt();
     }
 
@@ -1547,13 +1582,27 @@ public abstract class AbstractQueuedSynchronizer
      *        can represent anything you like.
      * @return the value returned from {@link #tryRelease}
      */
+    /**
+     * 在独占模式下释放。如果{@link #tryRelease}返回true，将唤醒一个或多个等待线程。
+     * 此方法可用于实现`Lock#unlock`方法。
+     *
+     * @param arg 释放参数。此值会传递给{@link #tryRelease}，除此之外不做特定解释，
+     *            可以代表任何你想要的值。
+     * @return 从{@link #tryRelease}返回的值
+     */
     public final boolean release(int arg) {
+        // 尝试释放资源，如果成功
         if (tryRelease(arg)) {
+            // 获取同步队列的头节点
             Node h = head;
+            // 如果头节点不为空且其waitStatus不为0（即存在等待的后继节点）
             if (h != null && h.waitStatus != 0)
+                // 唤醒头节点的后继节点对应的线程
                 unparkSuccessor(h);
+            // 释放成功，返回true
             return true;
         }
+        // 释放失败，返回false
         return false;
     }
 
