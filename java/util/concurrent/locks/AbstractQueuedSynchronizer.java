@@ -835,7 +835,7 @@ public abstract class AbstractQueuedSynchronizer
      * @return 创建的新节点
      */
     private Node addWaiter(Node mode) {
-        // 为当前线程和给定模式创建一个新的节点
+        // 为当前线程和给定模式创建一个新的节点 //独享模式或共享模式
         Node node = new Node(Thread.currentThread(), mode);
         // Try the fast path of enq; backup to full enq on failure
         // 尝试快速入队路径：如果队列的尾节点已知（非空），则直接将新节点插入队列尾部
@@ -984,7 +984,7 @@ public abstract class AbstractQueuedSynchronizer
      */
     private void setHeadAndPropagate(Node node, int propagate) { //这里的propagate的值大于0，表示可以继续传播，有足够的许可
         Node h = head; // Record old head for check below // 先记录当前头节点，以便后续检查
-        setHead(node);
+        setHead(node); // 设置新节点为头节点
         /*
          * Try to signal next queued node if:
          *   Propagation was indicated by caller,
@@ -1011,10 +1011,10 @@ public abstract class AbstractQueuedSynchronizer
            * 但考虑到在高竞争场景下，大多数等待的线程可能很快需要被唤醒，
            * 因此这种保守策略是可以接受的，以确保同步的正确性和及时性。
         * */
-        if (propagate > 0 || h == null || h.waitStatus < 0 ||
-            (h = head) == null || h.waitStatus < 0) {
+        if (propagate > 0 || h == null || h.waitStatus < 0 || /*这里应该算是一种防守型编程吧*/
+            (h = head) == null /*这里重新获取了一次头结点，也就是当前的node节点*/ || h.waitStatus < 0) { //这些条件满足其一即可
             Node s = node.next;
-            if (s == null || s.isShared())
+            if (s == null || s.isShared()) /*这里如果s==null 后续会被doRelaseShared方法组织掉，如果是共享模式，则继续传播，如果是独占模式，就不会传播这里对独占模式进行了拦截*/
                 doReleaseShared();
         }
     }
@@ -1140,7 +1140,7 @@ public abstract class AbstractQueuedSynchronizer
              * retry to make sure it cannot acquire before parking.
              *   前驱节点状态为0或PROPAGATE，需要设置为SIGNAL来请求信号，但还不立即挂起。
              *    调用者需要重试以确保在挂起前确实无法获取资源。
-             *  这里也会讲head节点的值 设置为SIGNAL
+             *  这里也会将head节点的值 设置为SIGNAL，注意即使是共享模式，这里也是设置为SIGNAL
              */
             compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
         }
@@ -1346,6 +1346,7 @@ public abstract class AbstractQueuedSynchronizer
     /**
      * Acquires in shared interruptible mode.
      * @param arg the acquire argument
+     * 里和doAcquiredShared几乎是一样的，只有一个地方不一样，就是在parkAndCheckInterrupt()方法中，如果线程被中断，就会抛出异常
      */
     private void doAcquireSharedInterruptibly(int arg)
         throws InterruptedException {
@@ -1404,7 +1405,7 @@ public abstract class AbstractQueuedSynchronizer
                     return false;
                 if (shouldParkAfterFailedAcquire(p, node) &&
                     nanosTimeout > spinForTimeoutThreshold)
-                    LockSupport.parkNanos(this, nanosTimeout);
+                    LockSupport.parkNanos(this, nanosTimeout);//自带超时判断
                 if (Thread.interrupted())
                     throw new InterruptedException();
             }
@@ -1761,11 +1762,25 @@ public abstract class AbstractQueuedSynchronizer
      * you like.
      * @throws InterruptedException if the current thread is interrupted
      */
+    /**
+     * 在共享模式下获取，如果被中断则中止操作。
+     * 实现方式是先检查中断状态，然后至少调用一次{@link #tryAcquireShared}，
+     * 如果成功则返回。否则，线程将被加入队列，可能反复经历阻塞和解除阻塞的过程，
+     * 不断调用{@link #tryAcquireShared}直到成功或线程被中断。
+     *
+     * @param arg 获取操作的参数。
+     * 此值会传递给{@link #tryAcquireShared}，除此之外不做特定解释，
+     * 可以代表任何你想要的信息。
+     * @throws InterruptedException 如果当前线程在等待过程中被中断
+     */
     public final void acquireSharedInterruptibly(int arg)
             throws InterruptedException {
+        // 检查当前线程是否已被中断，如果是，则直接抛出InterruptedException
         if (Thread.interrupted())
             throw new InterruptedException();
+        // 尝试以共享模式获取资源，如果tryAcquireShared返回小于0表示获取失败
         if (tryAcquireShared(arg) < 0)
+            // 如果获取失败，则调用doAcquireSharedInterruptibly进行可中断的等待
             doAcquireSharedInterruptibly(arg);
     }
 
@@ -1785,10 +1800,25 @@ public abstract class AbstractQueuedSynchronizer
      * @return {@code true} if acquired; {@code false} if timed out
      * @throws InterruptedException if the current thread is interrupted
      */
+    /**
+     * 尝试以共享模式获取资源，如果被中断或给定的超时期限到达则放弃尝试。实现方式为：
+     * 首先检查中断状态，然后至少调用一次{@link #tryAcquireShared}，
+     * 如果成功则返回。否则，线程将被加入队列，可能反复经历阻塞和解除阻塞的过程，
+     * 不断调用{@link #tryAcquireShared}直到成功、线程被中断或超时。
+     *
+     * @param arg 获取操作的参数。此值会传递给{@link #tryAcquireShared}，
+     *          除此之外不做特定解释，可以表示任何你希望的内容。
+     * @param nanosTimeout 等待的最大纳秒数
+     * @return 如果获取成功返回{@code true}；如果超时返回{@code false}
+     * @throws InterruptedException 如果当前线程在等待过程中被中断
+     */
     public final boolean tryAcquireSharedNanos(int arg, long nanosTimeout)
             throws InterruptedException {
+        // 首先检查当前线程是否已被中断，如果是，则抛出InterruptedException
         if (Thread.interrupted())
             throw new InterruptedException();
+        // 尝试立即以共享模式获取资源，如果tryAcquireShared返回非负值表示成功
+        // // 如果立即获取失败，则调用doAcquireSharedNanos尝试在指定超时时间内获取
         return tryAcquireShared(arg) >= 0 ||
             doAcquireSharedNanos(arg, nanosTimeout);
     }
@@ -1851,13 +1881,24 @@ public abstract class AbstractQueuedSynchronizer
      * @return the first (longest-waiting) thread in the queue, or
      *         {@code null} if no threads are currently queued
      */
+    /**
+     * 返回队列中最先（等待时间最长）的线程，如果没有线程在队列中等待，则返回{@code null}。
+     *
+     * <p>在此实现中，此操作通常在常数时间内完成，但在其他线程并发修改队列时可能会进行迭代。
+     *
+     * @return 队列中最先（等待时间最长）的线程，如果没有线程在队列中等待，则返回{@code null}
+     */
     public final Thread getFirstQueuedThread() {
         // handle only fast path, else relay
+        // 只处理快速路径情况，其他情况转发给完整方法处理
         return (head == tail) ? null : fullGetFirstQueuedThread();
     }
 
     /**
      * Version of getFirstQueuedThread called when fastpath fails
+     */
+    /**
+     * 当快速路径检查失败时调用的获取队列首线程版本。
      */
     private Thread fullGetFirstQueuedThread() {
         /*
@@ -1867,6 +1908,11 @@ public abstract class AbstractQueuedSynchronizer
          * some other thread(s) concurrently performed setHead in
          * between some of our reads. We try this twice before
          * resorting to traversal.
+         */
+        /*
+         * 首个节点通常为head的下一个节点。尝试获取它的thread字段，确保一致读取：
+         * 如果thread字段被清空或s.prev不再是head，则在我们的某些读取之间其他线程并发执行了setHead操作。
+         * 我们尝试这一步两次，然后再转向遍历。
          */
         Node h, s;
         Thread st;
@@ -1883,16 +1929,19 @@ public abstract class AbstractQueuedSynchronizer
          * traversing from tail back to head to find first,
          * guaranteeing termination.
          */
-
-        Node t = tail;
+        /*
+         * head的next字段可能还没被设置，或者在setHead之后被重置。所以我们必须检查tail是否实际上是第一个节点。
+         * 如果不是，我们将继续安全地从tail向head方向遍历来寻找第一个线程，确保能找到并终止遍历。
+         */
+        Node t = tail; // 从尾部开始遍历
         Thread firstThread = null;
-        while (t != null && t != head) {
-            Thread tt = t.thread;
+        while (t != null && t != head) { // 遍历直到回到head或遇到null
+            Thread tt = t.thread; // 获取当前节点的线程引用
             if (tt != null)
-                firstThread = tt;
-            t = t.prev;
+                firstThread = tt; // 找到有效的线程引用，记录下来
+            t = t.prev; // 移动到前一个节点
         }
-        return firstThread;
+        return firstThread; // 返回找到的第一个线程
     }
 
     /**
@@ -1923,8 +1972,26 @@ public abstract class AbstractQueuedSynchronizer
      * is not the first queued thread.  Used only as a heuristic in
      * ReentrantReadWriteLock.
      */
+    /**
+     * 如果存在明显首个排队的线程，并且该线程正在独占模式下等待，则返回{@code true}。
+     * 如果此方法返回{@code true}，且当前线程正尝试以共享模式获取（即，该方法从{@link #tryAcquireShared}调用），
+     * 则可以确保当前线程不是队列中的首个等待线程。
+     * 此方法仅用作启发式判断，在`ReentrantReadWriteLock`等场景中使用。
+     */
+    /**
+     * 这个方法主要用于并发控制组件内部逻辑的优化，
+     * 特别是当需要快速判断当前线程是否能够安全地进行某些操作时
+     * （例如，在读写锁中，如果确定当前线程不是首个等待的独占锁请求者，那么尝试获取读锁的线程可以不必进一步检查）。
+     * 它提供了一种高效的方式来帮助决定是否需要进行更深入的同步控制逻辑，从而提高整体的并发性能。
+     * @return
+     */
     final boolean apparentlyFirstQueuedIsExclusive() {
-        Node h, s;
+        Node h, s; // 定义两个临时变量用于分别存储头节点和第二个节点
+        // 检查以下条件是否全部满足：
+        // 1. 队列的头节点不为null，表示队列非空
+        // 2. 头节点的下一个节点也不为null，意味着至少有两个节点在队列中
+        // 3. 第二个节点（即头节点的下一个节点）是非共享的，表示它在独占模式下等待
+        // 4. 第二个节点关联了一个线程，确保该节点有效
         return (h = head) != null &&
             (s = h.next)  != null &&
             !s.isShared()         &&
