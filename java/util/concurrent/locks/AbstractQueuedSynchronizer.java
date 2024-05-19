@@ -1850,8 +1850,9 @@ public abstract class AbstractQueuedSynchronizer
      *
      * <p>In this implementation, this operation returns in
      * constant time.
-     *
-     * @return {@code true} if there may be other threads waiting to acquire
+     * 查询是否有任何线程正在等待获取同步器。请注意，由于中断和超时导致的取消可能随时发生，返回
+     * {@code true} 并不保证任何其他线程将会获取同步器。
+     * @return {@code true} if there may be other threads waiting to acquire  {@code true} 如果可能有其他线程正在等待获取
      */
     public final boolean hasQueuedThreads() {
         return head != tail;
@@ -1863,7 +1864,10 @@ public abstract class AbstractQueuedSynchronizer
      *
      * <p>In this implementation, this operation returns in
      * constant time.
+     * 查询是否有任何线程曾经争用过该同步器；也就是说，是否有获取方法曾经被阻塞。
      *
+     * <p>在此实现中，此操作在常数时间内返回。
+
      * @return {@code true} if there has ever been contention
      */
     public final boolean hasContended() {
@@ -1949,18 +1953,20 @@ public abstract class AbstractQueuedSynchronizer
      *
      * <p>This implementation traverses the queue to determine
      * presence of the given thread.
+     *如果给定的线程当前在队列中，则返回true。
      *
-     * @param thread the thread
-     * @return {@code true} if the given thread is on the queue
-     * @throws NullPointerException if the thread is null
+     * <p>此实现遍历队列以确定给定线程是否存在。
+     * @param thread the thread 线程
+     * @return {@code true} if the given thread is on the queue  {@code true} 如果给定线程在队列中
+     * @throws NullPointerException if the thread is null NullPointerException 如果线程为空
      */
     public final boolean isQueued(Thread thread) {
         if (thread == null)
-            throw new NullPointerException();
-        for (Node p = tail; p != null; p = p.prev)
-            if (p.thread == thread)
+            throw new NullPointerException(); // 如果传入的线程为空，则抛出空指针异常。
+        for (Node p = tail; p != null; p = p.prev) // 从队列的尾部开始遍历，逐个节点向前检查。
+            if (p.thread == thread) // 如果当前节点的线程与传入的线程相同，返回true。
                 return true;
-        return false;
+        return false; // 如果遍历完队列没有找到对应的线程，返回false。
     }
 
     /**
@@ -2100,22 +2106,26 @@ public abstract class AbstractQueuedSynchronizer
      * acquire in exclusive mode. This has the same properties
      * as {@link #getQueuedThreads} except that it only returns
      * those threads waiting due to an exclusive acquire.
+     * 返回一个包含可能正在以独占模式等待获取同步器的线程的集合。
+     * 这具有与 {@link #getQueuedThreads} 相同的属性，只不过它只返回那些
+     * 因独占获取而等待的线程。
      *
      * @return the collection of threads
      */
     public final Collection<Thread> getExclusiveQueuedThreads() {
-        ArrayList<Thread> list = new ArrayList<Thread>();
-        for (Node p = tail; p != null; p = p.prev) {
-            if (!p.isShared()) {
-                Thread t = p.thread;
+        ArrayList<Thread> list = new ArrayList<Thread>(); // 创建一个新的ArrayList来保存线程
+        for (Node p = tail; p != null; p = p.prev) { // 从队列的尾部开始向前遍历
+            if (!p.isShared()) { // 只处理独占模式的节点
+                Thread t = p.thread; // 获取节点中的线程
                 if (t != null)
-                    list.add(t);
+                    list.add(t); // 如果线程不为空，将其添加到列表中
             }
         }
         return list;
     }
 
     /**
+     * 同理如上。
      * Returns a collection containing threads that may be waiting to
      * acquire in shared mode. This has the same properties
      * as {@link #getQueuedThreads} except that it only returns
@@ -2141,6 +2151,9 @@ public abstract class AbstractQueuedSynchronizer
      * followed by the current value of {@link #getState}, and either
      * {@code "nonempty"} or {@code "empty"} depending on whether the
      * queue is empty.
+     * 返回一个标识此同步器及其状态的字符串。
+     * 状态部分包含字符串 {@code "State ="} 后跟当前的 {@link #getState} 值，
+     * 并且根据队列是否为空显示 {@code "nonempty"} 或 {@code "empty"}。
      *
      * @return a string identifying this synchronizer, as well as its state
      */
@@ -2159,6 +2172,9 @@ public abstract class AbstractQueuedSynchronizer
      * a condition queue, is now waiting to reacquire on sync queue.
      * @param node the node
      * @return true if is reacquiring
+     * 如果一个节点（总是最初放置在条件队列上的节点）现在正在同步队列上等待重新获取锁，则返回 true。
+     * @param node 节点
+     * @return 如果正在重新获取锁，则返回 true
      */
     final boolean isOnSyncQueue(Node node) {
         if (node.waitStatus == Node.CONDITION || node.prev == null)
@@ -2173,6 +2189,11 @@ public abstract class AbstractQueuedSynchronizer
          * unless the CAS failed (which is unlikely), it will be
          * there, so we hardly ever traverse much.
          */
+        /* 这里的意思是 node.prev不为null的时候，依然可能因为cas失败而无法放到队列上。
+         * node.prev 可以是非空的，但尚未在队列上，因为将其放置在队列上的 CAS 操作可能会失败。
+         * 因此我们必须从尾部开始遍历以确保它确实在队列上。在对该方法的调用中，它总是接近尾部，
+         * 除非 CAS 失败（这不太可能），它将会在队列上，所以我们几乎不需要遍历很多。
+         */
         return findNodeFromTail(node);
     }
 
@@ -2180,6 +2201,9 @@ public abstract class AbstractQueuedSynchronizer
      * Returns true if node is on sync queue by searching backwards from tail.
      * Called only when needed by isOnSyncQueue.
      * @return true if present
+     * 如果节点在同步队列中，则通过从尾部向后搜索返回 true。
+     * 仅在 isOnSyncQueue 方法需要时调用。
+     * @return 如果存在则返回 true
      */
     private boolean findNodeFromTail(Node node) {
         Node t = tail;
@@ -2247,20 +2271,24 @@ public abstract class AbstractQueuedSynchronizer
      * Cancels node and throws exception on failure.
      * @param node the condition node for this wait
      * @return previous sync state
+     * 调用release方法并使用当前的同步状态值；返回保存的状态值。
+     * 如果失败，取消节点并抛出异常。
+     * @param node 这次等待的条件节点
+     * @return 之前的同步状态
      */
     final int fullyRelease(Node node) {
-        boolean failed = true;
+        boolean failed = true; // 默认设置为失败
         try {
-            int savedState = getState();
-            if (release(savedState)) {
-                failed = false;
-                return savedState;
+            int savedState = getState(); // 获取当前的同步状态
+            if (release(savedState)) {  // 尝试释放锁
+                failed = false; // 如果成功，设置失败为false
+                return savedState;  // 返回之前保存的状态值
             } else {
-                throw new IllegalMonitorStateException();
+                throw new IllegalMonitorStateException();  // 如果释放失败，抛出异常
             }
         } finally {
-            if (failed)
-                node.waitStatus = Node.CANCELLED;
+            if (failed) // 如果最终失败
+                node.waitStatus = Node.CANCELLED;  // 设置节点状态为取消
         }
     }
 
@@ -2273,9 +2301,14 @@ public abstract class AbstractQueuedSynchronizer
      * @param condition the condition
      * @return {@code true} if owned
      * @throws NullPointerException if the condition is null
+     * 查询给定的ConditionObject是否使用此同步器作为其锁。
+     *
+     * @param condition 条件对象
+     * @return {@code true} 如果是由此同步器拥有
+     * @throws NullPointerException 如果条件对象为null
      */
     public final boolean owns(ConditionObject condition) {
-        return condition.isOwnedBy(this);
+        return condition.isOwnedBy(this);  // 调用ConditionObject的isOwnedBy方法来检查
     }
 
     /**
@@ -2358,6 +2391,16 @@ public abstract class AbstractQueuedSynchronizer
      *
      * <p>This class is Serializable, but all fields are transient,
      * so deserialized conditions have no waiters.
+     *
+     * 为{@link AbstractQueuedSynchronizer}提供的{@link Lock}实现的Condition实现。
+     *
+     * <p>此类的方法文档描述了机制，
+     * 而不是从Lock和Condition用户的角度出发的行为规范。
+     * 导出的此类版本通常需要伴随着描述
+     * 依赖于关联的{@code AbstractQueuedSynchronizer}的条件语义的文档。
+     *
+     * <p>此类是可序列化的，但所有字段都是瞬态的，
+     * 因此反序列化的条件没有等待者。
      */
     public class ConditionObject implements Condition, java.io.Serializable {
         private static final long serialVersionUID = 1173984872572414699L;
