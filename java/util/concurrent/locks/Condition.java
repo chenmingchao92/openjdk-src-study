@@ -386,7 +386,7 @@ public interface Condition {
      这部分说明强调了在使用诸如awaitNanos(long)这类Condition方法时，调用线程应当已经获得了相应的锁
      。虽然这不是由Java语言本身强制执行的，但大多数Condition的实现会要求这样做，并且如果没有遵守，可能会抛出异常。
      因此，开发者在编写代码时，必须确保在调用这些等待方法之前已经正确地获取了锁，并且应当查阅所使用的具体实现文档，
-     了解其确切的要求和行为。
+     了解其确切的要求和行为 。
      *
      */
     void awaitUninterruptibly();
